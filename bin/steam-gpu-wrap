@@ -1,13 +1,8 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Steam Game VRAM Manager & PRIME Launcher
-# - Stops llama-server before game launch to free all VRAM on GTX 1060
-# - Launches the game with full NVIDIA PRIME offload
-# - Prompts user after game exit:
-#     * Normal exit (0): 60s timeout dialog; auto-starts llama.cpp on timeout or Yes.
-#     * Error/Crash (!=0): Warning dialog without auto-timeout (debugging mode).
-# - Automatically detects and loads the currently active model (active.gguf).
-# - Structured logging to ~/.local/state/vram-manager.log and journalctl.
+# Desktop-Agnostic: Works across KDE, GNOME, XFCE, MATE, Cinnamon, Sway, i3, etc.
+# Uses kdialog, zenity, or yad depending on current desktop environment.
 # ==============================================================================
 set -u
 
@@ -27,7 +22,88 @@ log() {
     logger -t steam-gpu-wrap "[$level] $*" 2>/dev/null || true
 }
 
-# Function to get readable active model label
+notify() {
+    local urgency="${1:-normal}"
+    local icon="${2:-preferences-system}"
+    local title="$3"
+    local body="$4"
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -a "VRAM Manažer" -u "$urgency" -i "$icon" "$title" "$body" 2>/dev/null || true
+    fi
+}
+
+# Universal GUI Dialog (returns 0=Yes, 1=No, 124=Timeout)
+gui_dialog_yesno() {
+    local title="$1"
+    local text="$2"
+    local timeout_sec="${3:-0}"
+
+    # 1. Prefer kdialog in KDE Plasma
+    if [ -n "${KDE_FULL_SESSION:-}" ] && command -v kdialog >/dev/null 2>&1; then
+        if [ "$timeout_sec" -gt 0 ]; then
+            timeout "$timeout_sec" kdialog --title "$title" --yesno "$text"
+            return $?
+        else
+            kdialog --title "$title" --warningyesno "$text"
+            return $?
+        fi
+    fi
+
+    # 2. Prefer zenity in GNOME, XFCE, Cinnamon, MATE, etc.
+    if command -v zenity >/dev/null 2>&1; then
+        local z_opts=(--question --title="$title" --text="$text" --width=450)
+        if [ "$timeout_sec" -gt 0 ]; then
+            z_opts+=(--timeout="$timeout_sec")
+        fi
+        zenity "${z_opts[@]}"
+        local z_code=$?
+        if [ $z_code -eq 0 ]; then
+            return 0
+        elif [ $z_code -eq 5 ]; then
+            return 124  # Zenity timeout mapped to standard 124
+        else
+            return 1
+        fi
+    fi
+
+    # 3. YAD (Yet Another Dialog) fallback
+    if command -v yad >/dev/null 2>&1; then
+        local y_opts=(--question --title="$title" --text="$text" --center --width=450)
+        if [ "$timeout_sec" -gt 0 ]; then
+            y_opts+=(--timeout="$timeout_sec")
+        fi
+        yad "${y_opts[@]}"
+        local y_code=$?
+        if [ $y_code -eq 0 ]; then
+            return 0
+        elif [ $y_code -eq 70 ]; then
+            return 124  # YAD timeout mapped to 124
+        else
+            return 1
+        fi
+    fi
+
+    # 4. Fallback to kdialog if present outside KDE
+    if command -v kdialog >/dev/null 2>&1; then
+        if [ "$timeout_sec" -gt 0 ]; then
+            timeout "$timeout_sec" kdialog --title "$title" --yesno "$text"
+            return $?
+        else
+            kdialog --title "$title" --warningyesno "$text"
+            return $?
+        fi
+    fi
+
+    # 5. Headless / No GUI fallback
+    log "WARN" "No GUI dialog tool found (zenity/yad/kdialog). Defaulting to auto-start after timeout."
+    if [ "$timeout_sec" -gt 0 ]; then
+        sleep "$timeout_sec"
+        return 124
+    else
+        return 1
+    fi
+}
+
 get_model_name() {
     if [ -L "$ACTIVE" ]; then
         local target
@@ -42,7 +118,7 @@ start_llama() {
     local model_name
     model_name=$(get_model_name)
     log "INFO" "Starting $SERVICE (Model: $model_name)..."
-    notify-send -a "VRAM Manažer" -i preferences-system "VRAM Manažer" "Spouštím llama.cpp (${model_name})..."
+    notify "normal" "preferences-system" "VRAM Manažer" "Spouštím llama.cpp (${model_name})..."
     systemctl --user start "$SERVICE"
 }
 
@@ -56,7 +132,7 @@ if systemctl --user is-active --quiet "$SERVICE"; then
     MEM_BEFORE=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | tr -d ' ' || echo "?")
     log "INFO" "Active llama.cpp detected (Model: $CURRENT_MODEL, VRAM used: ${MEM_BEFORE} MiB). Stopping service..."
     
-    notify-send -a "VRAM Manažer" -i input-gaming "VRAM Manažer" "Uvolňuji VRAM pro hru (zastavuji llama.cpp)..."
+    notify "normal" "input-gaming" "VRAM Manažer" "Uvolňuji VRAM pro hru (zastavuji llama.cpp)..."
     systemctl --user stop "$SERVICE"
     
     # Wait until GPU memory drops below 1000MB (max 5s)
@@ -92,7 +168,7 @@ CURRENT_MODEL=$(get_model_name)
 if [ $GAME_EXIT -eq 0 ]; then
     log "INFO" "Game exited normally (code 0). Prompting user (60s auto-restart timeout)..."
     PROMPT_MSG="Hra byla úspěšně ukončena.\n\nChcete obnovit llama.cpp (${CURRENT_MODEL})?\n\n(Při nečinnosti se spustí automaticky za 60 sekund)"
-    timeout 60 kdialog --title "VRAM & AI Manažer" --yesno "$PROMPT_MSG"
+    gui_dialog_yesno "VRAM & AI Manažer" "$PROMPT_MSG" 60
     DIALOG_EXIT=$?
     
     if [ $DIALOG_EXIT -eq 0 ]; then
@@ -103,17 +179,19 @@ if [ $GAME_EXIT -eq 0 ]; then
         start_llama
     else
         log "ACTION" "User declined restart (clicked No). Keeping VRAM free."
-        notify-send -a "VRAM Manažer" -i input-gaming "VRAM Manažer" "llama.cpp ponechán vypnutý (VRAM zůstává volná pro další hru)."
+        notify "normal" "input-gaming" "VRAM Manažer" "llama.cpp ponechán vypnutý (VRAM zůstává volná pro další hru)."
     fi
 else
     log "WARN" "Game crashed or exited with error (code: $GAME_EXIT). Prompting user in debugging mode."
     WARN_MSG="Hra skončila s chybou nebo byla přerušena (kód: ${GAME_EXIT}).\n\nChcete znovu spustit llama.cpp (${CURRENT_MODEL})?\n\n(Pokud hru ladíte, zvolte 'Ne', aby VRAM zůstala volná)"
-    if kdialog --title "VRAM & AI Manažer - Ladící režim" --warningyesno "$WARN_MSG"; then
+    gui_dialog_yesno "VRAM & AI Manažer - Ladící režim" "$WARN_MSG" 0
+    DIALOG_EXIT=$?
+    if [ $DIALOG_EXIT -eq 0 ]; then
         log "ACTION" "User clicked Yes after error. Starting llama.cpp."
         start_llama
     else
         log "ACTION" "User clicked No / closed dialog. Debugging mode active: keeping llama.cpp stopped."
-        notify-send -a "VRAM Manažer" -i dialog-warning "VRAM Manažer" "Ladící režim: llama.cpp zůstává vypnutý."
+        notify "normal" "dialog-warning" "VRAM Manažer" "Ladící režim: llama.cpp zůstává vypnutý."
     fi
 fi
 

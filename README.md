@@ -1,8 +1,8 @@
 # Steam VRAM & AI Manager (`steam-vram-manager`)
 
-An intelligent GPU VRAM and AI workload orchestrator for Linux workstations equipped with NVIDIA graphics cards running local LLMs (`llama.cpp` / `llama-server`) alongside Steam gaming.
+An intelligent, **desktop-agnostic** GPU VRAM and AI workload orchestrator for Linux workstations equipped with NVIDIA graphics cards running local LLMs (`llama.cpp` / `llama-server`) alongside Steam gaming.
 
-Originally designed for **Milhy-PC** (Intel HD 4600 iGPU for display + NVIDIA GeForce GTX 1060 6GB for Compute & 3D).
+Works across **any Linux desktop environment**: KDE Plasma, GNOME, XFCE, MATE, Cinnamon, LXQt, Sway, i3, Hyprland, etc.
 
 ---
 
@@ -26,7 +26,7 @@ sequenceDiagram
     participant Wrapper as steam-gpu-wrap
     participant Llama as llama.service (systemd)
     participant GPU as NVIDIA GTX 1060 (6GB)
-    participant Dialog as KDE kdialog
+    participant Dialog as Universal GUI (kdialog / zenity / yad)
 
     User->>Steam: Launch Game
     Steam->>Wrapper: Executes game via wrapper
@@ -59,10 +59,15 @@ sequenceDiagram
 
 ## ✨ Features
 
+- **Universal Desktop Compatibility (Agnostic):** Automatically detects the desktop environment and dynamically binds to the native toolkit:
+  - **KDE Plasma / LXQt:** Native `kdialog`.
+  - **GNOME / XFCE / MATE / Cinnamon:** Native `zenity`.
+  - **Tiling WMs (i3, Sway, Hyprland, bspwm):** `yad` or `zenity`.
+  - Headless/Fallback: Safe auto-start timer if no GUI dialog utility is present.
 - **Pre-Launch Synchronous VRAM Release:** Automatically pauses game execution until `llama.service` releases memory below 1000 MiB (verified via `nvidia-smi`).
-- **NVIDIA PRIME Render Offload:** Automatically injects `__NV_PRIME_RENDER_OFFLOAD=1`, `__GLX_VENDOR_LIBRARY_NAME=nvidia`, and Vulkan ICD variables so games render on the discrete NVIDIA card even when displays are wired to an Intel iGPU.
-- **Smart Post-Exit Dialog (KDE Wayland / X11 native):**
-  - **On clean exit (`0`):** 60-second interactive timer via `kdialog`. If the user is AFK or does not answer, `llama.cpp` auto-restarts. If the user clicks **No** (chaining another game), it stays stopped.
+- **NVIDIA PRIME Render Offload:** Automatically injects `__NV_PRIME_RENDER_OFFLOAD=1`, `__GLX_VENDOR_LIBRARY_NAME=nvidia`, and Vulkan ICD variables so games render on the discrete NVIDIA card even when displays are wired to an Intel or AMD iGPU.
+- **Smart Post-Exit Dialog:**
+  - **On clean exit (`0`):** 60-second interactive timer. If the user is AFK or does not answer, `llama.cpp` auto-restarts. If the user clicks **No** (chaining another game), it stays stopped.
   - **On crash/error (`!= 0`):** Warning dialog without auto-timeout (debugging mode) to prevent endless VRAM reload loops while troubleshooting crashing games.
 - **Dynamic Model Resolution:** Dynamically resolves the currently active model from `/home/milhy777/llama-models/active.gguf` (supports switching between Mistral, Qwen, etc.).
 - **Structured Persistent Logging:** All sessions, memory states, exit codes, and decisions are logged to `~/.local/state/vram-manager.log` and systemd journal (`logger -t steam-gpu-wrap`).
@@ -84,7 +89,7 @@ Steam-VRAM-Manager/
 ├── driver-fix/
 │   ├── nvidia-debian.pref         # APT pinning (prioritizes Debian 550 over CUDA 615)
 │   └── fix-nvidia-pascal.sh       # Automated driver repair for GTX 1060 / Pascal
-├── install.sh                     # Complete project installer
+├── install.sh                     # Universal Linux installer
 ├── uninstall.sh                   # Clean uninstaller
 └── README.md                      # Documentation
 ```
