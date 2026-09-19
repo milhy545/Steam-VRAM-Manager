@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Steam Game VRAM Manager & PRIME Launcher
+# - Stops llama-server before game launch to free all VRAM on GTX 1060
+# - Launches the game with full NVIDIA PRIME offload
+# - Prompts user after game exit:
+#     * Normal exit (0): 60s timeout dialog; auto-starts llama.cpp on timeout or Yes.
+#     * Error/Crash (!=0): Warning dialog without auto-timeout (debugging mode).
+# - Automatically detects and loads the currently active model (active.gguf).
+# - Structured logging to ~/.local/state/vram-manager.log and journalctl.
+# ==============================================================================
+set -u
+
+SERVICE="llama-mistral.service"
+MODEL_DIR="/home/milhy777/llama-models"
+ACTIVE="$MODEL_DIR/active.gguf"
+LOG_DIR="$HOME/.local/state"
+LOG_FILE="$LOG_DIR/vram-manager.log"
+
+mkdir -p "$LOG_DIR"
+
+log() {
+    local level="$1"
+    shift
+    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $*"
+    echo "$msg" >> "$LOG_FILE"
+    logger -t steam-gpu-wrap "[$level] $*" 2>/dev/null || true
+}
+
+# Function to get readable active model label
+get_model_name() {
+    if [ -L "$ACTIVE" ]; then
+        local target
+        target=$(readlink -f "$ACTIVE" 2>/dev/null || echo "$ACTIVE")
+        basename "$target" .gguf
+    else
+        echo "active.gguf"
+    fi
+}
+
+start_llama() {
+    local model_name
+    model_name=$(get_model_name)
+    log "INFO" "Starting $SERVICE (Model: $model_name)..."
+    notify-send -a "VRAM Manažer" -i preferences-system "VRAM Manažer" "Spouštím llama.cpp (${model_name})..."
+    systemctl --user start "$SERVICE"
+}
+
+GAME_NAME=$(basename "${1:-unknown}")
+log "START" "=== Launching game: $GAME_NAME ==="
+log "DEBUG" "Full command: $*"
+
+# 1. Pre-launch: Stop llama server to free 5.4 GB VRAM
+if systemctl --user is-active --quiet "$SERVICE"; then
+    CURRENT_MODEL=$(get_model_name)
+    MEM_BEFORE=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | tr -d ' ' || echo "?")
+    log "INFO" "Active llama.cpp detected (Model: $CURRENT_MODEL, VRAM used: ${MEM_BEFORE} MiB). Stopping service..."
+    
+    notify-send -a "VRAM Manažer" -i input-gaming "VRAM Manažer" "Uvolňuji VRAM pro hru (zastavuji llama.cpp)..."
+    systemctl --user stop "$SERVICE"
+    
+    # Wait until GPU memory drops below 1000MB (max 5s)
+    for _ in {1..10}; do
+        MEM_USED=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | tr -d ' ' || echo "0")
+        if [ "${MEM_USED:-0}" -lt 1000 ]; then
+            break
+        fi
+        sleep 0.5
+    done
+    MEM_AFTER=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | tr -d ' ' || echo "?")
+    log "INFO" "VRAM freed: ${MEM_AFTER} MiB currently used on GPU."
+else
+    log "INFO" "llama.cpp is not currently active. Proceeding with game launch."
+fi
+
+# 2. PRIME Render Offload to run on NVIDIA GeForce GTX 1060
+export __NV_PRIME_RENDER_OFFLOAD=1
+export __GLX_VENDOR_LIBRARY_NAME=nvidia
+export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/nvidia_icd.json
+
+log "EXEC" "Running game process..."
+
+# 3. Launch game with all arguments
+"$@"
+GAME_EXIT=$?
+
+log "EXIT" "Game process finished with exit code: $GAME_EXIT"
+
+# 4. Post-launch handling
+CURRENT_MODEL=$(get_model_name)
+
+if [ $GAME_EXIT -eq 0 ]; then
+    log "INFO" "Game exited normally (code 0). Prompting user (60s auto-restart timeout)..."
+    PROMPT_MSG="Hra byla úspěšně ukončena.\n\nChcete obnovit llama.cpp (${CURRENT_MODEL})?\n\n(Při nečinnosti se spustí automaticky za 60 sekund)"
+    timeout 60 kdialog --title "VRAM & AI Manažer" --yesno "$PROMPT_MSG"
+    DIALOG_EXIT=$?
+    
+    if [ $DIALOG_EXIT -eq 0 ]; then
+        log "ACTION" "User confirmed restart (clicked Yes). Starting llama.cpp."
+        start_llama
+    elif [ $DIALOG_EXIT -eq 124 ]; then
+        log "ACTION" "60-second timeout expired with no user input. Auto-starting llama.cpp."
+        start_llama
+    else
+        log "ACTION" "User declined restart (clicked No). Keeping VRAM free."
+        notify-send -a "VRAM Manažer" -i input-gaming "VRAM Manažer" "llama.cpp ponechán vypnutý (VRAM zůstává volná pro další hru)."
+    fi
+else
+    log "WARN" "Game crashed or exited with error (code: $GAME_EXIT). Prompting user in debugging mode."
+    WARN_MSG="Hra skončila s chybou nebo byla přerušena (kód: ${GAME_EXIT}).\n\nChcete znovu spustit llama.cpp (${CURRENT_MODEL})?\n\n(Pokud hru ladíte, zvolte 'Ne', aby VRAM zůstala volná)"
+    if kdialog --title "VRAM & AI Manažer - Ladící režim" --warningyesno "$WARN_MSG"; then
+        log "ACTION" "User clicked Yes after error. Starting llama.cpp."
+        start_llama
+    else
+        log "ACTION" "User clicked No / closed dialog. Debugging mode active: keeping llama.cpp stopped."
+        notify-send -a "VRAM Manažer" -i dialog-warning "VRAM Manažer" "Ladící režim: llama.cpp zůstává vypnutý."
+    fi
+fi
+
+log "DONE" "=== Session finished for $GAME_NAME ==="
+exit $GAME_EXIT

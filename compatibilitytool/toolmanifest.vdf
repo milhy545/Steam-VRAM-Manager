@@ -1,0 +1,8 @@
+"manifest"
+{
+  "commandline_waitforexitandrun" "/vram-wrapper waitforexitandrun %verb%"
+  "commandline" "/vram-wrapper %verb%"
+  "version" "2"
+  "use_sessions" "1"
+  "compatmanager_layer_name" "proton"
+}

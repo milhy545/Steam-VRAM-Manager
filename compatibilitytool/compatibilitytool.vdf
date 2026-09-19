@@ -1,0 +1,13 @@
+"compatibilitytools"
+{
+  "compat_tools"
+  {
+    "vram_proton"
+    {
+      "install_path" "."
+      "display_name" "Proton (VRAM & AI Auto-Manager)"
+      "from_oslist"  "windows"
+      "to_oslist"    "linux"
+    }
+  }
+}

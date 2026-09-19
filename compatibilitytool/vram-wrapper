@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -u
+
+find_proton() {
+    local candidates=(
+        "/media/milhy777/Steam/SteamLibrary/steamapps/common/Proton - Experimental/proton"
+        "/media/milhy777/Steam/SteamLibrary/steamapps/common/Proton Hotfix/proton"
+        "/media/milhy777/Steam/SteamLibrary/steamapps/common/Proton Next/proton"
+        "/home/milhy777/.steam/root/steamapps/common/Proton - Experimental/proton"
+        "/media/milhy777/4cc3eeb0-c16e-4249-a262-6ffd1e58a302/Steam/steamapps/common/Proton - Experimental/proton"
+    )
+    for p in "${candidates[@]}"; do
+        if [ -x "$p" ]; then
+            echo "$p"
+            return 0
+        fi
+    done
+    
+    local fallback
+    fallback=$(find /media/milhy777/ ~/.steam/root/steamapps/ -name "proton" -type f -perm -111 2>/dev/null | head -n 1)
+    if [ -n "$fallback" ]; then
+        echo "$fallback"
+        return 0
+    fi
+    return 1
+}
+
+PROTON_BIN=$(find_proton)
+if [ -z "$PROTON_BIN" ]; then
+    notify-send -a "VRAM Proton Wrapper" -i dialog-error "Chyba" "Proton nebyl v knihovně Steamu nalezen!"
+    exit 1
+fi
+
+exec /home/milhy777/.local/bin/steam-gpu-wrap "$PROTON_BIN" "$@"
