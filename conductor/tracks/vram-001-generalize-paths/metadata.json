@@ -1,0 +1,9 @@
+{
+  "status": "ready",
+  "type": "feature",
+  "title": "Generalize vram-wrapper Proton Discovery",
+  "description": "Replace hardcoded user-specific paths in vram-wrapper with dynamic discovery using $HOME, $USER, and Steam library detection via libraryfolders.vdf parsing.",
+  "priority": "critical",
+  "created": "2026-09-20T00:00:00Z",
+  "updated": "2026-09-20T00:00:00Z"
+}

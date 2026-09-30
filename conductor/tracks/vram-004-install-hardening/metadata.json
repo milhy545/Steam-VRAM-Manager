@@ -1,0 +1,9 @@
+{
+  "status": "planned",
+  "type": "feature",
+  "title": "install.sh Hardening: Dry-Run, Verify, Idempotency",
+  "description": "Add --dry-run and --verify flags to install.sh, make all file operations guarded, add pre-flight checks.",
+  "priority": "high",
+  "created": "2026-09-20T00:00:00Z",
+  "updated": "2026-09-20T00:00:00Z"
+}

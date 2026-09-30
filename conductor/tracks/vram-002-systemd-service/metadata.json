@@ -1,0 +1,9 @@
+{
+  "status": "planned",
+  "type": "feature",
+  "title": "systemd User Service for Log Rotation",
+  "description": "Add systemd user units for VRAM log rotation and optional wrapper daemon management.",
+  "priority": "high",
+  "created": "2026-09-20T00:00:00Z",
+  "updated": "2026-09-20T00:00:00Z"
+}

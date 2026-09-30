@@ -1,0 +1,9 @@
+{
+  "status": "planned",
+  "type": "feature",
+  "title": "VRAM Limit Enforcement via LD_PRELOAD Shim",
+  "description": "Implement C shim (libvram_limit.so) that interposes cudaMalloc/cudaFree to enforce VRAM_LIMIT_MB hard limit.",
+  "priority": "medium",
+  "created": "2026-09-20T00:00:00Z",
+  "updated": "2026-09-20T00:00:00Z"
+}
